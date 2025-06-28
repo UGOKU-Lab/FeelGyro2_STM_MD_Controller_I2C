@@ -60,7 +60,8 @@ DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE BEGIN PV */
-int32_t ControlState = 0;
+uint8_t state = 0;
+uint8_t txBuf[4];
 uint8_t prevState = 0xFF;
 uint32_t speed = MAX_SPEED;
 GPIO_PinState enableVal = GPIO_PIN_RESET;
@@ -158,8 +159,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	uint8_t state = 0;
-	uint8_t txBuf[4];
+
 
 	// 1) １バイト受信
 	HAL_I2C_Slave_Receive(&hi2c1, &state, 1, HAL_MAX_DELAY);
@@ -167,8 +167,37 @@ int main(void)
 	uart_size = sprintf(uart_data, "Got state=%u\r\n", state);
 	HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
 
-	// 2) ダミー回転数を作る（ここを実際のセンサ値取得に置き換え）
-	uint32_t rpm = state * 3000;  // テスト用
+	if (state != prevState) {
+		if (state == 1 ) {
+			speed = MAX_SPEED;
+			enableVal = GPIO_PIN_SET;
+		}else if (prevState == 1 && state == 2){
+			for (int i = 0; i <= steps; i++) {
+				float x = (float)i / steps;
+				float y = powf(100.0f, -x) * 0.7f;
+				uint32_t tmp = (uint32_t)(y * MAX_SPEED);
+				HAL_DAC_SetValue(&hdac1, DAC1_CHANNEL_1, DAC_ALIGN_12B_R, tmp);
+				HAL_Delay(30);
+				if (state == 1) break;
+			}
+			enableVal = GPIO_PIN_RESET;
+			speed = 0;
+		}else if(state == 0){
+			enableVal = GPIO_PIN_RESET;
+			speed = MAX_SPEED;
+		}else{
+			enableVal = GPIO_PIN_RESET;
+			speed = MAX_SPEED;
+		}
+	prevState = state;
+	}
+
+	HAL_DAC_SetValue(&hdac1, DAC1_CHANNEL_1, DAC_ALIGN_12B_R, speed);
+	HAL_GPIO_WritePin(Enable_GPIO_Port, Enable_Pin, enableVal);
+
+	tim2_count = __HAL_TIM_GET_COMPARE(&htim2,TIM_CHANNEL_1);
+	frequency = 64000000 / tim2_count;
+	rpm = frequency * 20 / 8;
 
 	// 3) 4バイトに分解して送信
 	txBuf[0] =  rpm        & 0xFF;
