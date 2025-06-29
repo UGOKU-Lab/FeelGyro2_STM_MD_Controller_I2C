@@ -33,7 +33,15 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_SPEED 2000
+#define MAX_SPEED 4095
+
+/*---- NTC ----*/
+#define ADC_MAX     4095.0f
+#define VCC         3.3f
+#define R_PULLUP    10000.0f      // プルアップ抵抗 10kΩ
+#define R0_NTC      5000.0f       // 25°C時のNTC抵抗
+#define BETA        3490.0f
+#define T0_K        298.15f       // 25°C = 298.15K
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,7 +69,7 @@ DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE BEGIN PV */
 uint8_t state = 0;
-uint8_t txBuf[4];
+uint8_t txBuf[5];
 uint8_t prevState = 0xFF;
 uint32_t speed = MAX_SPEED;
 GPIO_PinState enableVal = GPIO_PIN_RESET;
@@ -71,6 +79,8 @@ uint32_t uart_size;
 
 static int decelStep = -1;        // -1: 減速中ではない、0～steps: 減速ステップ
 const int steps     = 1000;       // 全ステップ数
+
+int temp_c_int;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,7 +99,32 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+float calc_temperature_from_adc(uint16_t adc_val){
+    float v_ntc = (adc_val / ADC_MAX) * VCC;
+    float r_ntc = (v_ntc * R_PULLUP) / (VCC - v_ntc);  // 分圧式からNTC抵抗を逆算
 
+    float ln_ratio = logf(r_ntc / R0_NTC);
+    float inv_temp = (1.0f / T0_K) + (ln_ratio / BETA);
+    float temp_K = 1.0f / inv_temp;
+
+    return temp_K - 273.15f;  // 摂氏に変換
+}
+
+void read_and_print_temperature(void){
+    uint16_t adc_val = 0;
+
+    HAL_ADC_Start(&hadc2);
+    if (HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY) == HAL_OK) {
+        adc_val = HAL_ADC_GetValue(&hadc2);
+    }
+    HAL_ADC_Stop(&hadc2);
+
+    float temp_c = calc_temperature_from_adc(adc_val);
+    temp_c_int = (int)(temp_c + 0.5f);  // 四捨五入して整数化
+
+	uart_size = sprintf(uart_data, "Temperature: %d °C (ADC=%d)\r\n", temp_c_int, adc_val);
+	HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
+}
 /* USER CODE END 0 */
 
 /**
@@ -136,12 +171,13 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_DAC_Start(&hdac1, DAC1_CHANNEL_1);
+  HAL_ADC_Start(&hadc2);
   HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_2);
 
   HAL_GPIO_WritePin(Enable_GPIO_Port, Enable_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(DigIn1_GPIO_Port, DigIn1_Pin, GPIO_PIN_SET );
-  HAL_GPIO_WritePin(DigIn2_GPIO_Port, DigIn2_Pin, GPIO_PIN_SET );
+  HAL_GPIO_WritePin(DigIn1_GPIO_Port, DigIn1_Pin, GPIO_PIN_RESET );
+  HAL_GPIO_WritePin(DigIn2_GPIO_Port, DigIn2_Pin, GPIO_PIN_RESET );
 
   dip_sw = HAL_GPIO_ReadPin(STM_SW3_GPIO_Port, STM_SW3_Pin) << 3 |
 		   HAL_GPIO_ReadPin(STM_SW2_GPIO_Port, STM_SW2_Pin) << 2 |
@@ -162,12 +198,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
+	read_and_print_temperature();
 	//１バイト受信
 	HAL_I2C_Slave_Receive(&hi2c1, &state, 1, HAL_MAX_DELAY);
 	//UART に受信状態を表示
-	uart_size = sprintf(uart_data, "Got state=%u\r\n", state);
-	HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
+	//uart_size = sprintf(uart_data, "Got state=%u\r\n", state);
+	//HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
 
 	//ControlState が変わったらデセル開始 or 即時処理 ---
 	if (state != prevState) {
@@ -224,7 +260,8 @@ int main(void)
 	txBuf[1] = (rpm >>  8) & 0xFF;
 	txBuf[2] = (rpm >> 16) & 0xFF;
 	txBuf[3] = (rpm >> 24) & 0xFF;
-	HAL_I2C_Slave_Transmit(&hi2c1, txBuf, 4, HAL_MAX_DELAY);
+	txBuf[4] = (uint8_t)temp_c_int;
+	HAL_I2C_Slave_Transmit(&hi2c1, txBuf, 5, HAL_MAX_DELAY);
 
 	HAL_Delay(30);
     /* USER CODE END WHILE */
