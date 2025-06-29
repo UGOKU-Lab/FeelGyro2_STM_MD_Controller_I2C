@@ -120,7 +120,7 @@ void read_and_print_temperature(void){
     HAL_ADC_Stop(&hadc2);
 
     float temp_c = calc_temperature_from_adc(adc_val);
-    temp_c_int = (int)(temp_c + 0.5f);  // 四捨五入して整数化
+    temp_c_int = (int)(temp_c + 0.5f - 1.0f);  // 四捨五入して整数化　補正で1度引く
 
 	uart_size = sprintf(uart_data, "Temperature: %d °C (ADC=%d)\r\n", temp_c_int, adc_val);
 	HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
