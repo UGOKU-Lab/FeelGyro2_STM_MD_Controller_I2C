@@ -68,6 +68,9 @@ GPIO_PinState enableVal = GPIO_PIN_RESET;
 
 char     uart_data[64];
 uint32_t uart_size;
+
+static int decelStep = -1;        // -1: 減速中ではない、0～steps: 減速ステップ
+const int steps     = 1000;       // 全ステップ数
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -160,51 +163,70 @@ int main(void)
   while (1)
   {
 
-
-	// 1) １バイト受信
+	//１バイト受信
 	HAL_I2C_Slave_Receive(&hi2c1, &state, 1, HAL_MAX_DELAY);
-	// UART に受信状態を表示
+	//UART に受信状態を表示
 	uart_size = sprintf(uart_data, "Got state=%u\r\n", state);
 	HAL_UART_Transmit(&huart1, (uint8_t*)uart_data, uart_size, 10);
 
+	//ControlState が変わったらデセル開始 or 即時処理 ---
 	if (state != prevState) {
-		if (state == 1 ) {
-			speed = MAX_SPEED;
-			enableVal = GPIO_PIN_SET;
-		}else if (prevState == 1 && state == 2){
-			for (int i = 0; i <= steps; i++) {
-				float x = (float)i / steps;
-				float y = powf(100.0f, -x) * 0.7f;
-				uint32_t tmp = (uint32_t)(y * MAX_SPEED);
-				HAL_DAC_SetValue(&hdac1, DAC1_CHANNEL_1, DAC_ALIGN_12B_R, tmp);
-				HAL_Delay(30);
-				if (state == 1) break;
-			}
-			enableVal = GPIO_PIN_RESET;
-			speed = 0;
-		}else if(state == 0){
-			enableVal = GPIO_PIN_RESET;
-			speed = MAX_SPEED;
-		}else{
-			enableVal = GPIO_PIN_RESET;
-			speed = MAX_SPEED;
+		if (state == 2 && prevState == 1) {
+			// “全開→ブレーキ” になった瞬間だけ減速ステップを開始
+			decelStep = 0;
 		}
-	prevState = state;
+		else if (state == 1) {
+			// 全開
+			speed     = MAX_SPEED;
+			enableVal = GPIO_PIN_SET;
+			decelStep = -1;     // 減速モード解除
+		}
+		else if (state == 0) {
+			// 停止
+			speed     = MAX_SPEED;
+			enableVal = GPIO_PIN_RESET;
+			decelStep = -1;
+		}
+		else {
+			// その他
+			speed     = MAX_SPEED;
+			enableVal = GPIO_PIN_RESET;
+			decelStep = -1;
+		}
+		prevState = state;
 	}
 
+    //デセル中なら、１ステップだけ減速処理を実行 ---
+    if (decelStep >= 0) {
+        float x = (float)decelStep / steps;               // 0.0～1.0
+        float y = powf(100.0f, -x) * 0.7f;                // 減速曲線
+        speed  = (uint32_t)(y * MAX_SPEED);
+        decelStep++;
+        if (decelStep > steps) {
+            // デセル完了
+            decelStep = -1;
+            speed     = 0;
+            enableVal = GPIO_PIN_RESET;
+        }
+    }
+
+    //DAC と Enable ピンに出力 ---
 	HAL_DAC_SetValue(&hdac1, DAC1_CHANNEL_1, DAC_ALIGN_12B_R, speed);
 	HAL_GPIO_WritePin(Enable_GPIO_Port, Enable_Pin, enableVal);
 
+    //RPM 計算 ---
 	tim2_count = __HAL_TIM_GET_COMPARE(&htim2,TIM_CHANNEL_1);
 	frequency = 64000000 / tim2_count;
 	rpm = frequency * 20 / 8;
 
-	// 3) 4バイトに分解して送信
+	//RPM を 4 バイトに分解して I2C 送信 ---
 	txBuf[0] =  rpm        & 0xFF;
 	txBuf[1] = (rpm >>  8) & 0xFF;
 	txBuf[2] = (rpm >> 16) & 0xFF;
 	txBuf[3] = (rpm >> 24) & 0xFF;
 	HAL_I2C_Slave_Transmit(&hi2c1, txBuf, 4, HAL_MAX_DELAY);
+
+	HAL_Delay(30);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
