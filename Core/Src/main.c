@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_DUTY 0.8f
+#define MAX_DUTY 1.0f
 
 /*---- NTC ----*/
 #define ADC_MAX     4095.0f
