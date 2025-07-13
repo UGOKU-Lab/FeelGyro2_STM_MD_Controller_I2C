@@ -236,7 +236,7 @@ int main(void)
     //デセル中なら、１ステップだけ減速処理を実行 ---
     if (decelStep >= 0) {
         float x = (float)decelStep / steps;               // 0.0～1.0
-        float y = powf(100.0f, -x) * 0.7f;                // 減速曲線
+        float y = powf(100.0f, -x) * 0.6f;                // 減速曲線
         speed  = (uint32_t)(y * MAX_SPEED);
         decelStep++;
         if (decelStep > steps) {
