@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_SPEED 4095
+#define MAX_DUTY 0.8f
 
 /*---- NTC ----*/
 #define ADC_MAX     4095.0f
@@ -71,8 +71,8 @@ DMA_HandleTypeDef hdma_usart1_tx;
 uint8_t state = 0;
 uint8_t txBuf[5];
 uint8_t prevState = 0xFF;
-uint32_t speed = MAX_SPEED;
 GPIO_PinState enableVal = GPIO_PIN_RESET;
+uint32_t MAX_SPEED = (uint32_t)(MAX_DUTY * 4095);
 
 char     uart_data[64];
 uint32_t uart_size;
@@ -140,6 +140,7 @@ int main(void)
 	uint32_t frequency;
 	uint32_t rpm;
 	uint32_t tim2_count;
+	uint32_t speed = MAX_SPEED;
 
 	const int steps = 1000;
   /* USER CODE END 1 */
